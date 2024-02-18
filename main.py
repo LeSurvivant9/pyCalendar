@@ -23,7 +23,24 @@ from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-SCOPES = ['https://www.googleapis.com/auth/calendar']
+SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/userinfo.email',
+          'https://www.googleapis.com/auth/userinfo.profile', 'openid']
+
+
+def get_user_email(credentials: Credentials) -> str:
+    """
+    Fetches the primary email address of the authenticated user.
+
+    :param credentials: Google OAuth2 credentials.
+    :return: The primary email address of the user.
+    """
+    people_service = build('people', 'v1', credentials=credentials)
+    profile = people_service.people().get(resourceName='people/me', personFields='emailAddresses').execute()
+    email_addresses = profile.get('emailAddresses', [])
+    primary_email = next((email['value'] for email in email_addresses if email.get('metadata', {}).get('primary')),
+                         None)
+
+    return primary_email
 
 
 def authenticate() -> Any:
@@ -179,6 +196,9 @@ def add_ics_events_to_google_calendar(service, calendar_id, ics_file_path, max_e
     :return: None
     """
     now = datetime.now(timezone.utc)
+    with open('token.pickle', 'rb') as token:
+        creds = pickle.load(token)
+    user_email: str = get_user_email(creds)
     added_events_count = 0
 
     with open(ics_file_path, 'rb') as ics_file:
@@ -201,6 +221,9 @@ def add_ics_events_to_google_calendar(service, calendar_id, ics_file_path, max_e
                         'dateTime': component.get('dtend').dt.isoformat(),
                         'timeZone': 'UTC',
                     },
+                    'attendees': [
+                        {'email': user_email}
+                    ],
                 }
 
                 try:
