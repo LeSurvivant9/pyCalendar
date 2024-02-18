@@ -415,7 +415,7 @@ def main():
     print(f"Suppression des événements terminée en {time.time() - deletion_start_time:.2f} secondes.\n")
 
     addition_start_time = time.time()
-    add_ics_events_to_google_calendar(service, subjects_calendar_id, "edt.ics", max_events=0)
+    add_ics_events_to_google_calendar(service, subjects_calendar_id, "edt.ics")
     print(f"Ajout d'événements terminé en {time.time() - addition_start_time:.2f} secondes.\n")
 
     total_time = time.time() - start_time
