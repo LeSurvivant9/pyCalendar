@@ -237,7 +237,7 @@ def add_ics_events_to_google_calendar(service, calendar_id, ics_file_path, max_e
     if added_events_count > 0:
         print(
             f"{added_events_count} événement{'s' if added_events_count > 1 else ''} "
-            f"{"ont" if added_events_count > 1 else 'a'} "
+            f"{'ont' if added_events_count > 1 else 'a'} "
             f"été ajouté{'s' if added_events_count > 1 else ''} au calendrier.")
     else:
         print("Aucun événement futur n'a été ajouté au calendrier.")
@@ -284,7 +284,7 @@ def delete_upcoming_events(service, calendar_id: str):
         # Print a message indicating the number of events that were deleted
         print(
             f"{total} événement{'s' if total > 1 else ''} "
-            f"{"ont" if total > 1 else 'a'} "
+            f"{'ont' if total > 1 else 'a'} "
             f"été supprimé{'s' if total > 1 else ''} au calendrier '{calendar_name}'.")
     except HttpError as error:
         # If an error occurred while deleting the events, print an error message
