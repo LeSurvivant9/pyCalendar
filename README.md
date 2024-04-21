@@ -8,6 +8,7 @@ pour configurer et exécuter le programme sur votre machine.
 - Git
 - Python 3.x
 - pip (généralement installé avec Python)
+- Chrome (pour selenium)
 
 ## Installation
 
