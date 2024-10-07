@@ -1,0 +1,5 @@
+.env.local
+.idea/
+token.json
+cookies.pkl
+*.ics
