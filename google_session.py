@@ -1,9 +1,8 @@
 import os
-import os.path
-from datetime import datetime
-from typing import Dict
+import sys
+from datetime import datetime, timedelta
+from pprint import pprint
 
-import icalendar
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -13,117 +12,160 @@ from googleapiclient.errors import HttpError
 
 class GoogleSession:
 
-    def __init__(self):
-        self.service = self._get_calendar_service()
+    def __init__(self) -> None:
+        self.service: build = self._get_calendar_service()
 
     @staticmethod
-    def _get_calendar_service():
-        SCOPES = ["https://www.googleapis.com/auth/calendar"]
+    def _get_calendar_service() -> build:
+        """
+        Récupère le service Google Calendar à partir du fichier credentials.json.
+        :return: Service Google Calendar initialisé.
+        """
+        SCOPES: list[str] = ["https://www.googleapis.com/auth/calendar"]
 
-        creds = None
+        creds: Credentials | None = None
         if os.path.exists("token.json"):
             creds = Credentials.from_authorized_user_file("token.json", SCOPES)
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    "credentials.json", SCOPES
-                )
+                flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
                 creds = flow.run_local_server(port=3001)
+            assert creds is not None
             with open("token.json", "w") as token:
                 token.write(creds.to_json())
-
         return build("calendar", "v3", credentials=creds)
 
-    def get_events_of(self, day: int) -> list[dict]:
-        now = datetime.datetime.now()
-        future_time = now + datetime.timedelta(days=day)
+    def get_all_calendars(self) -> list[dict]:
+        """
+        Récupère la liste de tous les calendriers Google.
+        :return: Liste des calendriers Google.
+        """
+        calendars: dict = self.service.calendarList().list().execute()
+        return calendars['items']
 
-        events_result = self.service.events().list(
-            calendarId='primary',
-            timeMin=now.isoformat() + 'Z',
-            timeMax=future_time.isoformat() + 'Z',
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
+    def get_events_of(self, day: int, calendar_id: str) -> list[dict]:
+        """
+        Récupère les événements du jour spécifié dans le calendrier spécifié.
+        :param calendar_id: ID du calendrier à rechercher.
+        :param day: Nombre de jours à partir d'aujourd'hui pour récupérer les événements.
+        :return: Liste des événements du jour spécifié.
+        """
+        now: datetime = datetime.now()
+        future_time: datetime = now + timedelta(days=day)
 
+        events_result = self.service.events().list(calendarId=calendar_id, timeMin=now.isoformat() + 'Z',
+                                                   timeMax=future_time.isoformat() + 'Z', singleEvents=True,
+                                                   orderBy='startTime').execute()
         events = events_result.get('items', [])
         return events
 
-    def get_calendar_id(self, calendar_name):
-        calendars = self.service.calendarList().list().execute()
+    def get_calendar_id(self, calendar_name: str) -> str | None:
+        """
+        Récupère l'ID du calendrier spécifié.
+        :param calendar_name: Nom du calendrier à rechercher.
+        :return: ID du calendrier ou None si le calendrier n'existe pas.
+        """
+        calendars: dict = self.service.calendarList().list().execute()
         for calendar in calendars['items']:
             if calendar['summary'] == calendar_name:
                 return calendar['id']
         return None
 
-    def create_calendar(self, calendar_name: str):
-        calendars = self.service.calendarList().list().execute()
+    def create_calendar(self, calendar_name: str) -> str:
+        """
+        Crée un nouveau calendrier avec le nom spécifié.
+        :param calendar_name: Nom du calendrier à créer.
+        :return: ID du calendrier créé.
+        """
+        calendars: dict = self.service.calendarList().list().execute()
         for calendar in calendars['items']:
             if calendar['summary'] == calendar_name:
-                print(f'The "{calendar_name}" calendar already exists.')
-                return
+                print(f'Le calendrier "{calendar_name}" existe déjà.')
+                return calendar['id']
 
-        new_calendar = {
-            'summary': calendar_name,
-            'timeZone': "Europe/Paris",
-        }
+        new_calendar: dict = {'summary': calendar_name, 'timeZone': "Europe/Paris", }
         created_calendar = self.service.calendars().insert(body=new_calendar).execute()
-        print(f'Created new calendar: {created_calendar["summary"]}')
+        print(f'Création du nouveau calendrier : {calendar_name}')
+        return created_calendar['id']
 
-    def import_events_from_ics(self, ics_file_path: str, calendar_id: str, include_past_events: bool = False):
-        current_date = datetime.now().date()
+    def import_events_to_calendar(self, events: list[dict], calendar_id: str,
+                                  min_date: datetime) -> None:
+        """
+        Importe les événements dans le calendrier spécifié à partir de la date minimale spécifiée.
+        :param events: Liste des événements à importer.
+        :param calendar_id: ID du calendrier.
+        :param min_date: Date minimale pour les événements à importer.
+        """
+        filtered_events = [event for event in events if datetime.fromisoformat(event['start']['dateTime']) >= min_date]
+        total_events = len(filtered_events)
+        print(f"Importation de {total_events} événement(s) dans le calendrier...")
+        for index, event in enumerate(filtered_events):
+            self.add_event_to_calendar(event, calendar_id)
+            display_progress_bar(index + 1, total_events, f"Évènement importé : {event['summary']}")
 
-        with open(ics_file_path, 'rb') as file:
-            calendar = icalendar.Calendar.from_ical(file.read())
-            for event in calendar.walk('vevent'):
-                dtstart, dtend = self._get_event_dates(event)
-
-                if include_past_events or dtstart.date() >= current_date:
-                    google_event = self.format_event_for_google_calendar(event, dtstart, dtend)
-                    self.add_event_to_calendar(google_event, calendar_id)
-
-    def format_event_for_google_calendar(self, event: icalendar.Event, dtstart: datetime, dtend: datetime) -> Dict:
-        event_title = str(event.get('summary'))
-        google_event = {'summary': event_title, 'location': str(event.get('location')),
-                        'description': str(event.get('description')), 'start': {
-                'dateTime': dtstart.isoformat(),
-                'timeZone': 'Europe/Paris',
-            }, 'end': {
-                'dateTime': dtend.isoformat(),
-                'timeZone': 'Europe/Paris',
-            }, 'colorId': self.assign_color_based_on_title(event_title)}
-        return google_event
-
-    def assign_color_based_on_title(self, title: str) -> str:
-        prefix = title[:2]
-        match prefix:
-            case "CM":
-                return '6'  # Bleu
-            case "TP":
-                return '2'  # Vert
-            case "TD":
-                return '5'  # Violet
-            case "DS":
-                return '9'  # Orange
-            case _:
-                return '1'  # Par défaut, aucune couleur
-
-    def _get_event_dates(self, event: icalendar.Event) -> tuple[datetime, datetime]:
-        dtstart = event.get('dtstart').dt
-        dtend = event.get('dtend').dt
-
-        if isinstance(dtstart, datetime) is False:
-            dtstart = datetime.combine(dtstart, datetime.min.time())
-        if isinstance(dtend, datetime) is False:
-            dtend = datetime.combine(dtend, datetime.min.time())
-
-        return dtstart, dtend
-
-    def add_event_to_calendar(self, google_event: Dict, calendar_id: str):
+    def add_event_to_calendar(self, event: dict, calendar_id: str):
+        """
+        Ajoute d'un événement au calendrier spécifié.
+        :param event: Dictionnaire de l'événements à ajouter.
+        :param calendar_id: ID du calendrier.
+        :return: 
+        """
         try:
-            self.service.events().insert(calendarId=calendar_id, body=google_event).execute()
-            print(f"Event added to calendar with colorId {google_event['colorId']}.")
+            self.service.events().insert(calendarId=calendar_id, body=event).execute()
         except HttpError as error:
             print(f"An error occurred: {error}")
+
+    def delete_event(self, event_id: str, calendar_id: str) -> None:
+        """
+        Supprime l'événement spécifié du calendrier spécifié.
+        :param event_id: ID de l'événement à supprimer.
+        :param calendar_id: ID du calendrier.
+        """
+        self.service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+
+    def delete_events_from_date(self, calendar_id: str, date: datetime = datetime.min) -> None:
+        """
+        Supprime tous les événements à partir de la date spécifiée dans le calendrier spécifié.
+        Si la date est None, supprime tous les événements du calendrier.
+        :param calendar_id: ID du calendrier.
+        :param date: Date minimale pour la suppression des événements.
+        """
+        print(f"Suppression des événements du calendrier à partir de la date {date}...")
+        events_result = self.service.events().list(calendarId=calendar_id, timeMin=date.isoformat() + 'Z',
+                                                   singleEvents=True, orderBy='startTime').execute()
+        events = events_result.get('items', [])
+        total_events = len(events)
+        print(f"Nombre total d'événements à supprimer : {total_events}")
+        for index, event in enumerate(events):
+            self.delete_event(event['id'], calendar_id)
+            display_progress_bar(index + 1, total_events, f"Évènement supprimé : {event['summary']}")
+
+
+def display_progress_bar(current: int, total: int, message: str) -> None:
+    """
+    Affiche une barre de progression pour la suppression des événements.
+    :param current: Nombre d'événements supprimés jusqu'à présent.
+    :param total: Nombre total d'événements à supprimer.
+    :param message: Message à afficher.
+    """
+    progress = (current / total) * 100
+    bar_length = 25
+    filled_length = int(bar_length * current // total)
+    bar = '%' * filled_length + '_' * (bar_length - filled_length)
+    sys.stdout.write(f"\r{message} - Progression: [{bar}] {progress:.2f}%")
+    sys.stdout.flush()
+
+
+if __name__ == '__main__':
+    separator: str = '-' * 100
+    google_session: GoogleSession = GoogleSession()
+    all_calendars: list[dict] = google_session.get_all_calendars()
+    pprint(all_calendars)
+    print(separator)
+    course_calendar_id: str | None = google_session.get_calendar_id('Cours')
+    assert course_calendar_id is not None
+    event_of_day: list[dict] = google_session.get_events_of(7, course_calendar_id)
+    pprint(event_of_day)
+    print(separator)
